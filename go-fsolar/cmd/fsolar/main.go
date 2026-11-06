@@ -42,8 +42,6 @@ import (
 	"strings"
 	"time"
 
-	"tinygo.org/x/bluetooth"
-
 	"fsolar/internal/fsolar"
 )
 
@@ -69,7 +67,7 @@ func main() {
 func run() int {
 	var o options
 	flag.StringVar(&o.via, "via", "ble", "transport: ble | tcp")
-	flag.StringVar(&o.addr, "addr", "", "MAC of the battery (BLE; skips scanning)")
+	flag.StringVar(&o.addr, "addr", "", "address of the battery, MAC (UUID on macOS) (BLE; skips scanning)")
 	flag.StringVar(&o.prefix, "prefix", fsolar.NamePrefix, "advertised name prefix to scan for (BLE)")
 	flag.StringVar(&o.host, "host", fsolar.DefaultTCPHost, "battery monitor address (TCP)")
 	flag.IntVar(&o.port, "port", fsolar.DefaultTCPPort, "battery monitor port (TCP)")
@@ -215,13 +213,12 @@ func runScan(c *fsolar.Client) error {
 
 func connectBLE(c *fsolar.Client, o options) error {
 	if o.addr != "" {
-		mac, err := bluetooth.ParseMAC(o.addr)
+		target, err := parseAddress(o.addr)
 		if err != nil {
-			return fmt.Errorf("bad -addr %q: %w", o.addr, err)
+			return err
 		}
-		target := bluetooth.NewMACAddress(mac, false)
 		fmt.Fprintf(os.Stderr, "connecting to %s ...\n", target.String())
-		return c.Connect(bluetooth.Address{MACAddress: target})
+		return c.Connect(target)
 	}
 
 	fmt.Fprintf(os.Stderr, "scanning for name prefix %q ...\n", o.prefix)
