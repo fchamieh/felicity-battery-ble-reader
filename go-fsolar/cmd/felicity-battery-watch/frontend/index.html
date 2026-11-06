@@ -14,20 +14,13 @@
 <div class="bg" aria-hidden="true"></div>
 
 <main class="container">
-  <header class="topbar">
-    <div class="brand-row">
-      <span class="status-dot" id="status-dot" title="Connection status"></span>
-    </div>
-  </header>
-
-  <!-- Scan view -->
   <section id="scan-view" aria-label="Battery scanner">
     <div class="scan-controls">
       <button id="scan-btn" class="btn">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 8.5a5 5 0 0 0 0 7"/><path d="M8.5 5.5a9 9 0 0 0 0 13"/><path d="M12 9a3 3 0 0 0 0 6"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg>
         Scan 10s
       </button>
-      <span id="scan-status" class="scan-status">Bluetooth ready — press Scan to find nearby batteries.</span>
+      <span id="scan-status" class="scan-status">Scanning…</span>
     </div>
 
     <div id="device-list" class="device-list">

@@ -13,7 +13,6 @@ const scanStatus = document.getElementById('scan-status');
 const deviceList = document.getElementById('device-list');
 const emptyState = document.getElementById('empty-state');
 const errorBanner = document.getElementById('error-banner');
-const statusDot = document.getElementById('status-dot');
 
 const detailName = document.getElementById('detail-name');
 const detailSn = document.getElementById('detail-sn');
@@ -37,6 +36,23 @@ let connectedId = null;
 let lastReadingTs = null;
 let pollCountdown = POLL_INTERVAL_S;
 let countdownTimer = null;
+let autoRetryTimer = null;
+const AUTO_RETRY_MS = 3000;
+
+function clearAutoRetry() {
+  if (autoRetryTimer) {
+    clearTimeout(autoRetryTimer);
+    autoRetryTimer = null;
+  }
+}
+
+function scheduleAutoRetry() {
+  clearAutoRetry();
+  if (scanInFlight || !scanView.hidden === false) return;
+  autoRetryTimer = setTimeout(() => {
+    if (!scanView.hidden && !scanInFlight) doScan();
+  }, AUTO_RETRY_MS);
+}
 
 function showToast(label, message) {
   toastLabel.textContent = label;
@@ -74,10 +90,6 @@ function rssiBars(rssi) {
 function fmt(n, digits = 1) {
   if (n === null || n === undefined || Number.isNaN(Number(n))) return '--';
   return Number(n).toFixed(digits);
-}
-
-function setStatusDot(state) {
-  statusDot.className = `status-dot ${state || ''}`;
 }
 
 function showView(viewName) {
@@ -176,32 +188,32 @@ async function doScan() {
   scanStatus.textContent = 'Scanning 10s for Felicity batteries…';
   scanBtn.classList.add('is-loading');
   scanBtn.disabled = true;
-  setStatusDot('scanning');
   try {
     const devices = await BatteryService.Scan(10);
     renderDevices(devices || []);
     const f = (devices || []).filter(d => d.isFelicity).length;
     scanStatus.textContent = devices?.length
       ? `Found ${devices.length} device(s) (${f} Felicity). Tap one to connect.`
-      : 'Scan complete — no devices found. Check the battery is powered and nearby.';
+      : 'Scan complete — no devices found. Retrying in 3s…';
+    if (f === 0) scheduleAutoRetry();
   } catch (err) {
     console.error(err);
     showError(errorMessage(err));
-    scanStatus.textContent = 'Scan failed. See error above.';
+    scanStatus.textContent = 'Scan failed. Retrying in 3s…';
+    scheduleAutoRetry();
   } finally {
     scanInFlight = false;
     scanBtn.classList.remove('is-loading');
     scanBtn.disabled = false;
-    setStatusDot('');
   }
 }
 
 async function connect(id, name, devSn) {
   if (!id || connectingId) return;
   connectingId = id;
+  clearAutoRetry();
   showError('');
   scanStatus.textContent = `Connecting to ${name || id}…`;
-  setStatusDot('scanning');
   // Clear before Connect: the backend emits the first reading
   // synchronously inside Connect(), so resetting after the await
   // would erase that already-rendered SOC/kWh.
@@ -218,14 +230,13 @@ async function connect(id, name, devSn) {
     detailName.textContent = name || id;
     detailSn.textContent = devSn ? `DevSN ${devSn}` : `ID ${id}`;
     showView('detail');
-    setStatusDot('connected');
     showToast('Connected', `${name || id} · reading every ${POLL_INTERVAL_S}s`);
     startCountdown();
   } catch (err) {
     console.error(err);
     showError(`Connect failed: ${errorMessage(err)}`);
-    scanStatus.textContent = 'Connection failed — try scanning again.';
-    setStatusDot('');
+    scanStatus.textContent = 'Connection failed. Retrying in 3s…';
+    scheduleAutoRetry();
   } finally {
     connectingId = null;
     renderDevicesSafe();
@@ -246,9 +257,10 @@ async function disconnect(silent = false) {
   }
   connectedId = null;
   showView('scan');
-  setStatusDot('');
-  scanStatus.textContent = 'Disconnected. Press Scan to find batteries again.';
+  scanStatus.textContent = 'Disconnected. Scanning again…';
   if (!silent) showToast('Disconnected', 'Link closed.');
+  clearAutoRetry();
+  doScan();
 }
 
 // Backend push events (broadcast while polling / scanning).
@@ -264,13 +276,11 @@ Events.On('battery:reading', (evt) => {
 Events.On('battery:connection', (evt) => {
   const c = evt?.data || {};
   if (c.connected) {
-    setStatusDot('connected');
     if (c.error) {
       showError(c.error);
       showToast('Connected', c.error);
     }
   } else {
-    setStatusDot('');
     stopCountdown();
     if (c.error) {
       showError(`Connection lost: ${c.error}`);
@@ -306,7 +316,8 @@ document.getElementById('refresh-btn').addEventListener('click', async () => {
   }
 });
 
-// Initial state: nudge into a first scan.
+// Initial state: auto-scan with retry on launch.
 showView('scan');
-statusDot.className = 'status-dot';
 renderDevices([]);
+clearAutoRetry();
+doScan();
