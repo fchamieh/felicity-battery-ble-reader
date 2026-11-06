@@ -1,7 +1,7 @@
 // Command gencrc extracts the two CRC-16 tables that FSolar uses in its binary
 // (0x18/0x19) protocol from the decompiled source and writes them as Go.
 //
-// Usage: go run ./tools/gencrc decompiled/sources/b/b.java go-fsolar/internal/fsolar/crc_tables.go
+// Usage: go run ./tools/gencrc decompiled/sources/b/b.java go-fsolar/pkg/fsolar/crc_tables.go
 package main
 
 import (

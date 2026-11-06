@@ -15,6 +15,14 @@ same reassembly, field table and commands.
 Protocol details and how they were verified: **[`../PROTOCOL.md`](../PROTOCOL.md)**
 (§1.4 covers the WiFi/TCP transport).
 
+## Desktop app
+
+**`cmd/felicity-battery-watch`** is a cross-platform Wails v3 app (vanilla JS)
+that wraps the same `pkg/fsolar` library: scan over BLE, tap a battery and watch
+pack SOC % and remaining kWh, polled every 60 s. Run/build with `wails3 dev` /
+`wails3 build` from `cmd/felicity-battery-watch` — see
+[`cmd/felicity-battery-watch/README.md`](cmd/felicity-battery-watch/README.md).
+
 ## Build
 
 Go 1.27. Bluetooth is provided by
@@ -139,15 +147,15 @@ appends a `hint:` line for the common ones. The most frequent cases:
 
 | file | role |
 |------|------|
-| `internal/fsolar/protocol.go` | UUIDs, command strings, JSON notification reassembly |
-| `internal/fsolar/link.go`     | `Link` interface shared by both transports |
-| `internal/fsolar/client.go`   | BLE: adapter, scan, connect, subscribe, request/response |
-| `internal/fsolar/tcp.go`      | TCP: the battery's WiFi-hotspot transport |
-| `internal/fsolar/errors.go`   | translates numeric BLE-stack error codes into hints |
-| `internal/fsolar/model.go`    | raw JSON → decoded values via the field table |
-| `internal/fsolar/fields_gen.go` | generated field table for device type 112 |
-| `internal/fsolar/binary.go`   | AES-CBC + CRC binary frames (legacy sticks) |
-| `internal/fsolar/crc_tables.go` | the app's hard-coded CRC tables |
+| `pkg/fsolar/protocol.go` | UUIDs, command strings, JSON notification reassembly |
+| `pkg/fsolar/link.go`     | `Link` interface shared by both transports |
+| `pkg/fsolar/client.go`   | BLE: adapter, scan, connect, subscribe, request/response |
+| `pkg/fsolar/tcp.go`      | TCP: the battery's WiFi-hotspot transport |
+| `pkg/fsolar/errors.go`   | translates numeric BLE-stack error codes into hints |
+| `pkg/fsolar/model.go`    | raw JSON → decoded values via the field table |
+| `pkg/fsolar/fields_gen.go` | generated field table for device type 112 |
+| `pkg/fsolar/binary.go`   | AES-CBC + CRC binary frames (legacy sticks) |
+| `pkg/fsolar/crc_tables.go` | the app's hard-coded CRC tables |
 | `cmd/fsolar/main.go`          | CLI |
 | `tools/relay/`                | Android TCP relay for bridging the battery to a PC |
 | `../tools/genfields`          | regenerates `fields_gen.go` from the app's JSON |
@@ -173,7 +181,7 @@ HCI snoop log (`capture/reassembled.jsonl`).
 
 ```
 go run ./tools/genfields apk/extract/json/protocol_realtime_1.0.27.json 112 \
-    go-fsolar/internal/fsolar/fields_gen.go
+    go-fsolar/pkg/fsolar/fields_gen.go
 ```
 
 Change `112` to another device `Type` to support a different product family.

@@ -42,7 +42,7 @@ import (
 	"strings"
 	"time"
 
-	"fsolar/internal/fsolar"
+	"fsolar/pkg/fsolar"
 )
 
 type options struct {

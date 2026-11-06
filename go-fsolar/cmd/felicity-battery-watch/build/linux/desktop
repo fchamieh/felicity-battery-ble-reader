@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=My Product
+Comment=A felicity-battery-watch application
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/felicity-battery-watch %u
+Terminal=false
+Type=Application
+Icon=felicity-battery-watch
+Categories=Utility;
+StartupWMClass=felicity-battery-watch
+
+ 

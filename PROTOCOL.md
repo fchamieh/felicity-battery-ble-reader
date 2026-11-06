@@ -397,12 +397,12 @@ meaning: read `payload["BattList"][0][0]` and multiply by
 always exactly two numbers (all 2750 non-empty positions in the shipped table
 have this shape). An empty `position` means the key holds a scalar.
 
-`tools/genfields` turns that file into `internal/fsolar/fields_gen.go` — 46
+`tools/genfields` turns that file into `pkg/fsolar/fields_gen.go` — 46
 fields for type 112. It is regenerated with:
 
 ```
 go run ./tools/genfields apk/extract/json/protocol_realtime_1.0.27.json 112 \
-    go-fsolar/internal/fsolar/fields_gen.go
+    go-fsolar/pkg/fsolar/fields_gen.go
 ```
 
 A firmware that sends `[53060]` instead of `[[53060]]` is accepted too.

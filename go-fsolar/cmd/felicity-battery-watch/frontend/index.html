@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <link rel="icon" type="image/svg+xml" href="/wails.png"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400..900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css"/>
+    <title>Felicity Battery Watch</title>
+</head>
+<body>
+<div class="bg" aria-hidden="true"></div>
+
+<main class="container">
+  <header class="topbar">
+    <div class="brand-row">
+      <span class="status-dot" id="status-dot" title="Connection status"></span>
+    </div>
+  </header>
+
+  <!-- Scan view -->
+  <section id="scan-view" aria-label="Battery scanner">
+    <div class="scan-controls">
+      <button id="scan-btn" class="btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 8.5a5 5 0 0 0 0 7"/><path d="M8.5 5.5a9 9 0 0 0 0 13"/><path d="M12 9a3 3 0 0 0 0 6"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg>
+        Scan 10s
+      </button>
+      <span id="scan-status" class="scan-status">Bluetooth ready — press Scan to find nearby batteries.</span>
+    </div>
+
+    <div id="device-list" class="device-list">
+      <div class="empty-state" id="empty-state">No devices yet. Run a scan and Felicity batteries will appear here.</div>
+    </div>
+  </section>
+
+  <!-- Detail view -->
+  <section id="detail-view" class="detail-view" hidden aria-label="Battery detail">
+    <div class="detail-head">
+      <button id="back-btn" class="btn btn-ghost" aria-label="Back to scan">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+        Back
+      </button>
+      <div class="detail-device">
+        <span id="detail-name" class="detail-name">Battery</span>
+        <span id="detail-sn" class="detail-sn"></span>
+      </div>
+    </div>
+
+    <div class="gauge-card">
+      <div class="gauge-label">Pack SOC</div>
+      <div class="gauge-main">
+        <span id="soc-value" class="num num-hero">--</span><span class="gauge-pct">%</span>
+      </div>
+      <div class="gauge-bar" aria-hidden="true">
+        <div id="soc-bar" class="gauge-bar-fill"></div>
+      </div>
+      <div class="gauge-kwh">
+        <span class="gauge-kwh-label">Remaining</span>
+        <span><span id="kwh-value" class="num num-kwh">--</span> <span class="gauge-unit">kWh</span></span>
+      </div>
+    </div>
+
+    <div class="stats-grid" role="table" aria-label="Battery stats">
+      <div class="stat">
+        <div class="stat-label">Voltage</div>
+        <div class="stat-value"><span id="voltage-value" class="num">--</span> <span class="stat-unit">V</span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Current</div>
+        <div class="stat-value"><span id="current-value" class="num">--</span> <span class="stat-unit">A</span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Capacity</div>
+        <div class="stat-value"><span id="capacity-value" class="num">--</span> <span class="stat-unit">Ah</span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Next poll</div>
+        <div class="stat-value"><span id="next-poll-value" class="num">60</span> <span class="stat-unit">s</span></div>
+        <div class="stat-sub"><span id="updated-label">Waiting for first reading…</span></div>
+      </div>
+    </div>
+
+    <div class="detail-actions">
+      <button id="refresh-btn" class="btn btn-secondary">Read now</button>
+      <button id="disconnect-btn" class="btn btn-ghost btn-danger">Disconnect</button>
+    </div>
+  </section>
+
+  <div id="error-banner" class="error-banner" hidden role="alert"></div>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite">
+  <span class="toast-label" id="toast-label">Status</span>
+  <span class="toast-msg" id="toast-msg"></span>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
