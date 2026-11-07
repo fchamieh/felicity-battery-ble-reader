@@ -20,7 +20,7 @@ The protocol was reverse-engineered from the **FSolar 4.1.1** Android app
 | Path | What it is |
 |------|------------|
 | `go-fsolar/cmd/fsolar` | **The CLI** — build, usage and troubleshooting: [go-fsolar/README.md](go-fsolar/README.md) |
-| `go-fsolar/cmd/felicity-battery-watch` | **Desktop app (Wails v3, vanilla JS)** — scan, tap a Felicity battery, watch SOC % and remaining kWh (60 s poll): [go-fsolar/cmd/felicity-battery-watch/README.md](go-fsolar/cmd/felicity-battery-watch/README.md) |
+| `go-fsolar/cmd/felicity-battery-watch` | **Desktop app (Wails v3, vanilla JS)** — scan over BLE (or dial the WiFi hotspot over TCP), tap a battery, watch SOC % and remaining kWh (60 s poll): [go-fsolar/cmd/felicity-battery-watch/README.md](go-fsolar/cmd/felicity-battery-watch/README.md) |
 | `go-fsolar/pkg/fsolar` | Shared library: GATT/protocol, BLE + TCP transports, realtime decoding (used by the CLI and the desktop app) |
 | `PROTOCOL.md` | The full protocol: GATT layout, commands, JSON shapes, fixed-point scaling, TCP transport |
 | `tools/` | Research tooling: btsnoop→ATT extractor, CRC/field-table generators, ground-truth Java (the app's decompiled code, run on a JVM) |

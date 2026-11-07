@@ -75,6 +75,14 @@ func (c *TCPClient) Enable() error { return nil }
 func (c *TCPClient) SetOnNotify(fn func(doc string)) { c.onNotify = fn }
 func (c *TCPClient) SetOnDisconnect(fn func(error))  { c.onDisconnect = fn }
 
+// Target is the "host:port" endpoint the client dials, in net.JoinHostPort
+// form ("[::1]:53970" for IPv6). Used as the TCP link's identity.
+func (c *TCPClient) Target() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
+}
+
 // Connected reports whether the socket is up.
 func (c *TCPClient) Connected() bool {
 	c.mu.Lock()

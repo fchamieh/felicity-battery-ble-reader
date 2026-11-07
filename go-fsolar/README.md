@@ -19,8 +19,10 @@ Protocol details and how they were verified: **[`../PROTOCOL.md`](../PROTOCOL.md
 
 **`cmd/felicity-battery-watch`** is a cross-platform Wails v3 app (vanilla JS)
 that wraps the same `pkg/fsolar` library: scan over BLE, tap a battery and watch
-pack SOC % and remaining kWh, polled every 60 s. Run/build with `wails3 dev` /
-`wails3 build` from `cmd/felicity-battery-watch` — see
+pack SOC % and remaining kWh, polled every 60 s — or switch to **WiFi · TCP** and
+dial `192.168.155.1:53970` (or `127.0.0.1` through the phone bridge below) for the
+exact same readings. `wails3 build` / `wails3 dev` from `cmd/felicity-battery-watch`,
+or launch straight into TCP mode with `-via tcp -host 127.0.0.1` — see
 [`cmd/felicity-battery-watch/README.md`](cmd/felicity-battery-watch/README.md).
 
 ## Build
@@ -88,6 +90,9 @@ fsolar -via tcp real
 fsolar -via tcp -interval 5s watch
 ```
 
+The desktop app takes the identical path: switch it to **WiFi · TCP** and press
+Connect, or launch it with `-via tcp -host 127.0.0.1`.
+
 Two caveats from the field:
 
 * **Windows 11 will not join the AP** — the battery's WPA/WPA2 mix includes
@@ -106,6 +111,19 @@ Two caveats from the field:
 
   `tools/fsolar-probe.ps1` (outside this module) does the same thing without
   the relay, one short-lived `nc` connection per command.
+
+* No battery in the room? `tools/mockbattery` is a stand-in monitor socket that
+  answers with the documents captured from a real pack:
+
+  ```
+  go run ./tools/mockbattery                     # 127.0.0.1:53970, 5 min
+  fsolar -via tcp -host 127.0.0.1 -count 2 -interval 3s watch
+  ../bin/felicity-battery-watch.exe -via tcp -host 127.0.0.1
+  ```
+
+  It logs every command it receives, so it also proves which commands a client
+  actually sends (`-payload capture/live/real.json` to swap the realtime reply,
+  `-duration 0` to run until Ctrl-C).
 
 The relay and the one-shot probe both exist because the battery's simple TCP
 stack services **one client at a time** and does not recover from a TCP

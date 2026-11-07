@@ -4,6 +4,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"fsolar/pkg/fsolar"
 )
 
 func TestParseReadingPayload(t *testing.T) {
@@ -51,5 +53,96 @@ func TestParseAddress(t *testing.T) {
 	}
 	if _, err := parseAddress("not-an-address"); err == nil {
 		t.Error("expected error for garbage")
+	}
+}
+
+func TestNewBatteryServiceDefaults(t *testing.T) {
+	s := NewBatteryService("", "", 0)
+	info := s.GetTransport()
+	if info.Mode != TransportBLE {
+		t.Errorf("Mode = %q, want %q", info.Mode, TransportBLE)
+	}
+	if info.Host != fsolar.DefaultTCPHost || info.Port != fsolar.DefaultTCPPort {
+		t.Errorf("endpoint = %s:%d, want %s:%d",
+			info.Host, info.Port, fsolar.DefaultTCPHost, fsolar.DefaultTCPPort)
+	}
+	if info.Connected {
+		t.Error("a fresh service must not report a connection")
+	}
+}
+
+func TestNewBatteryServiceTCP(t *testing.T) {
+	s := NewBatteryService("TCP", "127.0.0.1", 53970)
+	info := s.GetTransport()
+	if info.Mode != TransportTCP || info.Host != "127.0.0.1" || info.Port != 53970 {
+		t.Errorf("GetTransport() = %+v, want tcp 127.0.0.1:53970", info)
+	}
+}
+
+func TestSetTransportRemembersEndpoint(t *testing.T) {
+	s := NewBatteryService("tcp", "127.0.0.1", 53971)
+	if err := s.SetTransport("ble", "", 0); err != nil {
+		t.Fatalf("SetTransport(ble): %v", err)
+	}
+	info := s.GetTransport()
+	if info.Mode != TransportBLE {
+		t.Errorf("Mode = %q, want %q", info.Mode, TransportBLE)
+	}
+	// Switching to Bluetooth must not forget the TCP endpoint.
+	if info.Host != "127.0.0.1" || info.Port != 53971 {
+		t.Errorf("endpoint = %s:%d, want 127.0.0.1:53971", info.Host, info.Port)
+	}
+	if err := s.SetTransport("tcp", "", 0); err != nil {
+		t.Fatalf("SetTransport(tcp): %v", err)
+	}
+	info = s.GetTransport()
+	if info.Mode != TransportTCP || info.Host != "127.0.0.1" || info.Port != 53971 {
+		t.Errorf("GetTransport() = %+v, want tcp 127.0.0.1:53971", info)
+	}
+}
+
+func TestSetTransportRejectsBadInput(t *testing.T) {
+	s := &BatteryService{}
+	if err := s.SetTransport("carrier-pigeon", "", 0); err == nil {
+		t.Error("expected error for an unknown transport")
+	}
+	if err := s.SetTransport("tcp", "127.0.0.1", 70000); err == nil {
+		t.Error("expected error for an out-of-range port")
+	}
+	// A rejected change must leave the previous transport in place.
+	if info := s.GetTransport(); info.Mode != TransportBLE {
+		t.Errorf("Mode = %q after a rejected change, want %q", info.Mode, TransportBLE)
+	}
+}
+
+func TestScanIsBluetoothOnly(t *testing.T) {
+	s := NewBatteryService("tcp", "127.0.0.1", 53970)
+	if _, err := s.Scan(1); err == nil {
+		t.Error("expected Scan to refuse in TCP mode")
+	}
+}
+
+func TestSplitHostPort(t *testing.T) {
+	cases := []struct {
+		in     string
+		wantH  string
+		wantP  int
+		wantOK bool
+	}{
+		{"192.168.155.1", "192.168.155.1", 0, true},
+		{"127.0.0.1:53970", "127.0.0.1", 53970, true},
+		{"[::1]:53970", "::1", 53970, true},
+		{"host:not-a-port", "host", 0, false},
+		{"", "", 0, false},
+	}
+	for _, c := range cases {
+		host, port, err := splitHostPort(c.in)
+		if (err == nil) != c.wantOK {
+			t.Errorf("splitHostPort(%q): err = %v, wantOK = %v", c.in, err, c.wantOK)
+			continue
+		}
+		if host != c.wantH || port != c.wantP {
+			t.Errorf("splitHostPort(%q) = %q/%d, want %q/%d", c.in, host, port, c.wantH, c.wantP)
+		}
 	}
 }

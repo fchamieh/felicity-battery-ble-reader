@@ -9,10 +9,18 @@ const POLL_INTERVAL_S = 60;
 const scanView = document.getElementById('scan-view');
 const detailView = document.getElementById('detail-view');
 const scanBtn = document.getElementById('scan-btn');
+const scanBtnLabel = document.getElementById('scan-btn-label');
 const scanStatus = document.getElementById('scan-status');
 const deviceList = document.getElementById('device-list');
 const emptyState = document.getElementById('empty-state');
 const errorBanner = document.getElementById('error-banner');
+
+const modeBLEBtn = document.getElementById('mode-ble');
+const modeTCPBtn = document.getElementById('mode-tcp');
+const tcpFields = document.getElementById('tcp-fields');
+const tcpHostInput = document.getElementById('tcp-host');
+const tcpPortInput = document.getElementById('tcp-port');
+const transportHint = document.getElementById('transport-hint');
 
 const detailName = document.getElementById('detail-name');
 const detailSn = document.getElementById('detail-sn');
@@ -39,6 +47,41 @@ let countdownTimer = null;
 let autoRetryTimer = null;
 const AUTO_RETRY_MS = 3000;
 
+// 'ble' | 'tcp' — mirrored from the backend, which owns the real link.
+let transport = 'ble';
+
+const BLE_HINT = 'Bluetooth LE — the battery advertises as <strong>F&lt;DevSN&gt;</strong>.';
+
+function tcpHint(host, port) {
+  const target = escapeHtml(`${host || '192.168.155.1'}:${port || 53970}`);
+  const local = host === '127.0.0.1' || host === 'localhost' || host.startsWith('::1');
+  const how = local
+    ? 'via the phone/adb relay — see go-fsolar/README.md.'
+    : 'this PC must be joined to the battery\u2019s WiFi hotspot.';
+  return `TCP <strong>${target}</strong> — ${how}`;
+}
+
+function endpointLabel() {
+  const host = tcpHostInput.value.trim() || '192.168.155.1';
+  const port = Number(tcpPortInput.value) || 53970;
+  return `${host}:${port}`;
+}
+
+function setTransportUI(mode) {
+  transport = mode === 'tcp' ? 'tcp' : 'ble';
+  const isTCP = transport === 'tcp';
+  modeBLEBtn.classList.toggle('is-active', !isTCP);
+  modeTCPBtn.classList.toggle('is-active', isTCP);
+  modeBLEBtn.setAttribute('aria-pressed', String(!isTCP));
+  modeTCPBtn.setAttribute('aria-pressed', String(isTCP));
+  tcpFields.hidden = !isTCP;
+  deviceList.hidden = isTCP;
+  scanBtnLabel.textContent = isTCP ? 'Connect' : 'Scan 10s';
+  transportHint.innerHTML = isTCP
+    ? tcpHint(tcpHostInput.value.trim(), Number(tcpPortInput.value))
+    : BLE_HINT;
+}
+
 function clearAutoRetry() {
   if (autoRetryTimer) {
     clearTimeout(autoRetryTimer);
@@ -48,7 +91,9 @@ function clearAutoRetry() {
 
 function scheduleAutoRetry() {
   clearAutoRetry();
-  if (scanInFlight || !scanView.hidden === false) return;
+  // Auto-retry is a Bluetooth-scan convenience only: hammering a dial on a
+  // failed TCP connect is unkind to the battery, which serves one client.
+  if (transport === 'tcp' || scanInFlight || !scanView.hidden === false) return;
   autoRetryTimer = setTimeout(() => {
     if (!scanView.hidden && !scanInFlight) doScan();
   }, AUTO_RETRY_MS);
@@ -181,6 +226,7 @@ function renderReading(r) {
 }
 
 async function doScan() {
+  if (transport === 'tcp') return doConnectTCP();
   if (scanInFlight) return;
   scanInFlight = true;
   showError('');
@@ -208,6 +254,87 @@ async function doScan() {
   }
 }
 
+function clearReadingFields() {
+  socValue.textContent = '--';
+  kwhValue.textContent = '--';
+  voltageValue.textContent = '--';
+  currentValue.textContent = '--';
+  capacityValue.textContent = '--';
+  socBar.style.width = '0%';
+  updatedLabel.textContent = 'Waiting for first reading…';
+}
+
+// switchTransport asks the backend to change transport, then mirrors it in
+// the UI. Any live link is closed first — the battery serves one client.
+async function switchTransport(mode) {
+  if (mode === transport) return;
+  clearAutoRetry();
+  if (connectedId) {
+    try {
+      await BatteryService.Disconnect();
+    } catch (err) {
+      console.error(err);
+    }
+    connectedId = null;
+    stopCountdown();
+  }
+  setTransportUI(mode);
+  showView('scan');
+  renderDevices([]);
+  if (mode === 'tcp') {
+    scanStatus.textContent = 'Set the host and port, then press Connect.';
+    await applyTcpSettings();
+  } else {
+    scanStatus.textContent = 'Ready to scan.';
+    doScan();
+  }
+}
+
+// Remember the typed endpoint so it survives a transport switch and a restart
+// of the view. Empty values are fine — the backend fills in its defaults.
+async function applyTcpSettings() {
+  try {
+    await BatteryService.SetTransport(
+      transport, tcpHostInput.value.trim(), Number(tcpPortInput.value) || 0);
+  } catch (err) {
+    console.error(err);
+    showError(errorMessage(err));
+  }
+}
+
+// WiFi hotspot / TCP link: one dial, then the same 60 s poll loop as Bluetooth.
+async function doConnectTCP() {
+  if (scanInFlight) return;
+  scanInFlight = true;
+  showError('');
+  const host = tcpHostInput.value.trim();
+  const port = Number(tcpPortInput.value) || 0;
+  const label = `${host || '192.168.155.1'}:${port || 53970}`;
+  scanStatus.textContent = `Connecting to ${label}…`;
+  scanBtn.classList.add('is-loading');
+  scanBtn.disabled = true;
+  // Cleared before the call: the backend emits the first reading inside
+  // ConnectTCP, so resetting after the await would erase it.
+  clearReadingFields();
+  try {
+    await BatteryService.ConnectTCP(host, port);
+    connectedId = label;
+    detailName.textContent = `WiFi · ${label}`;
+    detailSn.textContent = 'TCP link to the battery monitor socket';
+    showView('detail');
+    showToast('Connected', `${label} · reading every ${POLL_INTERVAL_S}s`);
+    startCountdown();
+  } catch (err) {
+    console.error(err);
+    showError(`Connect failed: ${errorMessage(err)}`);
+    scanStatus.textContent = 'Could not dial the battery. Check host/port (and the adb relay), then press Connect again.';
+  } finally {
+    scanInFlight = false;
+    scanBtn.classList.remove('is-loading');
+    scanBtn.disabled = false;
+  }
+}
+
 async function connect(id, name, devSn) {
   if (!id || connectingId) return;
   connectingId = id;
@@ -217,13 +344,7 @@ async function connect(id, name, devSn) {
   // Clear before Connect: the backend emits the first reading
   // synchronously inside Connect(), so resetting after the await
   // would erase that already-rendered SOC/kWh.
-  socValue.textContent = '--';
-  kwhValue.textContent = '--';
-  voltageValue.textContent = '--';
-  currentValue.textContent = '--';
-  capacityValue.textContent = '--';
-  socBar.style.width = '0%';
-  updatedLabel.textContent = 'Waiting for first reading…';
+  clearReadingFields();
   try {
     await BatteryService.Connect(id);
     connectedId = id;
@@ -257,10 +378,15 @@ async function disconnect(silent = false) {
   }
   connectedId = null;
   showView('scan');
-  scanStatus.textContent = 'Disconnected. Scanning again…';
+  scanStatus.textContent = 'Disconnected.';
   if (!silent) showToast('Disconnected', 'Link closed.');
   clearAutoRetry();
-  doScan();
+  if (transport === 'tcp') {
+    scanStatus.textContent = 'Disconnected. Press Connect to dial again.';
+  } else {
+    scanStatus.textContent = 'Disconnected. Scanning again…';
+    doScan();
+  }
 }
 
 // Backend push events (broadcast while polling / scanning).
@@ -299,11 +425,27 @@ function disconnectedFallback() {
   socValue.textContent = '--';
   kwhValue.textContent = '--';
   socBar.style.width = '0%';
-  updatedLabel.textContent = 'Link closed — go Back and rescan.';
+  updatedLabel.textContent = transport === 'tcp'
+    ? 'Link closed — go Back, then Connect again.'
+    : 'Link closed — go Back and rescan.';
   connectedId = null;
 }
 
-scanBtn.addEventListener('click', doScan);
+// Backend push events for transport changes (SetTransport / a -via tcp launch).
+Events.On('battery:transport', (evt) => {
+  const t = evt?.data || {};
+  if (t.host) tcpHostInput.value = t.host;
+  if (t.port) tcpPortInput.value = t.port;
+  if (t.mode) setTransportUI(t.mode);
+});
+
+scanBtn.addEventListener('click', () => (transport === 'tcp' ? doConnectTCP() : doScan()));
+modeBLEBtn.addEventListener('click', () => switchTransport('ble'));
+modeTCPBtn.addEventListener('click', () => switchTransport('tcp'));
+tcpHostInput.addEventListener('change', applyTcpSettings);
+tcpPortInput.addEventListener('change', applyTcpSettings);
+tcpHostInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doConnectTCP(); });
+tcpPortInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doConnectTCP(); });
 document.getElementById('back-btn').addEventListener('click', () => disconnect(false));
 document.getElementById('disconnect-btn').addEventListener('click', () => disconnect(false));
 document.getElementById('refresh-btn').addEventListener('click', async () => {
@@ -316,8 +458,29 @@ document.getElementById('refresh-btn').addEventListener('click', async () => {
   }
 });
 
-// Initial state: auto-scan with retry on launch.
+// Restore the transport the backend was launched with (-via / -host / -port),
+// then start: auto-scan for Bluetooth, a Connect prompt for TCP.
+async function initTransport() {
+  try {
+    const info = await BatteryService.GetTransport();
+    if (info) {
+      if (info.host) tcpHostInput.value = info.host;
+      if (info.port) tcpPortInput.value = info.port;
+      setTransportUI(info.mode);
+    }
+  } catch (err) {
+    console.error('GetTransport failed:', err);
+  }
+  if (transport === 'tcp') {
+    // Launched straight into WiFi mode (-via tcp): dial once, no click needed.
+    scanStatus.textContent = 'Dialling the battery over TCP…';
+    doConnectTCP();
+  } else {
+    doScan();
+  }
+}
+
 showView('scan');
 renderDevices([]);
 clearAutoRetry();
-doScan();
+initTransport();

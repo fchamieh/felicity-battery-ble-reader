@@ -15,10 +15,26 @@
 
 <main class="container">
   <section id="scan-view" aria-label="Battery scanner">
+    <div class="transport-bar">
+      <div class="seg" role="group" aria-label="Transport">
+        <button id="mode-ble" class="seg-btn is-active" type="button">Bluetooth</button>
+        <button id="mode-tcp" class="seg-btn" type="button">WiFi · TCP</button>
+      </div>
+      <div id="tcp-fields" class="tcp-fields" hidden>
+        <label class="field">Host
+          <input id="tcp-host" type="text" value="192.168.155.1" spellcheck="false" autocomplete="off" autocapitalize="off"/>
+        </label>
+        <label class="field">Port
+          <input id="tcp-port" type="number" value="53970" min="1" max="65535" step="1"/>
+        </label>
+      </div>
+    </div>
+    <p id="transport-hint" class="transport-hint">Bluetooth LE — the battery advertises as <strong>F&lt;DevSN&gt;</strong>.</p>
+
     <div class="scan-controls">
       <button id="scan-btn" class="btn">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 8.5a5 5 0 0 0 0 7"/><path d="M8.5 5.5a9 9 0 0 0 0 13"/><path d="M12 9a3 3 0 0 0 0 6"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg>
-        Scan 10s
+        <span id="scan-btn-label">Scan 10s</span>
       </button>
       <span id="scan-status" class="scan-status">Scanning…</span>
     </div>
