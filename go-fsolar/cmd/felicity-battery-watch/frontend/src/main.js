@@ -137,11 +137,19 @@ function fmt(n, digits = 1) {
   return Number(n).toFixed(digits);
 }
 
+function setSocFocus(on) {
+  socFocus = !!on;
+  document.body.classList.toggle('soc-focus', socFocus);
+}
+
 function showView(viewName) {
   const isDetail = viewName === 'detail';
   scanView.hidden = isDetail;
   detailView.hidden = !isDetail;
-  if (!isDetail) stopCountdown();
+  if (!isDetail) {
+    stopCountdown();
+    setSocFocus(false);
+  }
 }
 
 function renderDevices(devices) {
@@ -365,6 +373,8 @@ async function connect(id, name, devSn) {
 }
 
 let lastDevicesCache = [];
+let socFocus = false;
+
 function renderDevicesSafe() {
   if (lastDevicesCache.length) renderDevices(lastDevicesCache);
 }
@@ -456,6 +466,13 @@ document.getElementById('refresh-btn').addEventListener('click', async () => {
     console.error(err);
     showError(errorMessage(err));
   }
+});
+
+const gaugeCard = document.querySelector('.gauge-card');
+gaugeCard?.addEventListener('dblclick', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  setSocFocus(!socFocus);
 });
 
 // Restore the transport the backend was launched with (-via / -host / -port),
