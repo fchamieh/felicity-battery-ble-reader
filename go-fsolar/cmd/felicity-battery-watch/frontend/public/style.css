@@ -197,8 +197,8 @@ body.soc-focus .gauge-card {
 .gauge-label { color: var(--muted); font-size: 0.78rem; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700; }
 .gauge-main { display: flex; align-items: baseline; justify-content: center; gap: 0.25rem; margin: 0.2rem 0; }
 .num { font-family: 'Orbitron', ui-monospace, SFMono-Regular, monospace; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
-.num-hero { font-size: clamp(3.6rem, 12vw, 5rem); font-weight: 800; line-height: 1; }
-.gauge-pct { font-size: 1.6rem; font-weight: 700; color: var(--muted); }
+.num-hero { font-size: clamp(7.2rem, 24vw, 10rem); font-weight: 800; line-height: 1; }
+.gauge-pct { font-size: 3.2rem; font-weight: 700; color: var(--muted); }
 .gauge-bar { height: 10px; border-radius: 999px; background: rgba(255,255,255,0.08); overflow: hidden; margin: 0.6rem 0 0.9rem; }
 .gauge-bar-fill { height: 100%; background: var(--grad); width: 0%; transition: width 0.6s cubic-bezier(0.22,0.68,0.2,1); }
 .gauge-kwh { display: flex; flex-direction: column; gap: 0.15rem; align-items: center; }

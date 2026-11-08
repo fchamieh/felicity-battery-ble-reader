@@ -1,4 +1,4 @@
-import {Events, WML} from "@wailsio/runtime";
+import {Events, WML, Window} from "@wailsio/runtime";
 import {BatteryService} from "../bindings/felicity-battery-watch";
 
 // Wire up data-wml-openURL links once the DOM is ready.
@@ -141,6 +141,9 @@ function fmt(n, digits = 1) {
 function setSocFocus(on) {
   socFocus = !!on;
   document.body.classList.toggle('soc-focus', socFocus);
+  // In SOC focus (card-only watch view), hide window chrome so only the card
+  // shows on the desktop. Restore the normal framed window when leaving.
+  Window.SetFrameless(socFocus).catch((err) => console.error('SetFrameless failed:', err));
 }
 
 function showView(viewName) {
