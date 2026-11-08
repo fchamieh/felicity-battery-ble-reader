@@ -1,13 +1,15 @@
 # Felicity Battery Watch
 
-Cross-platform desktop monitor for Felicity Solar batteries. Scan over **Bluetooth
-LE**, tap a battery, and watch pack SOC (%) and remaining energy (kWh) — polled
-every 60 s. Or dial the battery's **WiFi hotspot over TCP** and watch the same
-numbers.
+Cross-platform desktop monitor for Felicity Solar batteries. Watch pack SOC (%) and
+remaining energy (kWh) every 60 s over the battery's **WiFi hotspot (TCP, default)**
+or over **Bluetooth LE**.
+
+WiFi mode is flaky-link safe: each scheduled reading opens a fresh TCP connection,
+requests realtime data, and closes the connection before the next poll. This avoids
+half-closed sockets on the battery's single-client monitor port.
 
 Built with [Wails v3](https://wails.io) (vanilla JS + Vite frontend) on top of the
-shared `fsolar/pkg/fsolar` library — the same code the `fsolar` CLI uses, over the
-same `Link` interface.
+shared `fsolar/pkg/fsolar` library — the same code the `fsolar` CLI uses.
 
 ## Prerequisites
 
@@ -58,28 +60,34 @@ wails3 build GOOS=darwin                   # run this on a Mac (Xcode)
 wails3 package FORMAT=msix                 # Windows MSIX (wails3 task install:msix:tools)
 ```
 
-## Usage — Bluetooth (default)
+## Usage — WiFi hotspot (TCP, default)
 
-1. Windows Settings → **Bluetooth on**; power the battery within range.
-2. **Scan 10s** → Felicity batteries advertise as `F` + DevSN (e.g. `F072604825024250800`),
-   strongest RSSI first.
-3. Tap one → it connects and shows SOC %, remaining kWh, voltage, current and capacity.
-4. Readings repeat every 60 s; **Read now** fetches at once, **Disconnect / Back**
-   returns to scanning. Failed scans retry automatically after 3 s.
+Pick **WiFi · TCP** (selected by default), set host and port, press **Connect**
+(Enter in either field works too). The app starts watching and polls every 60 s.
 
-The service the app uses is `6e6f736a-4643-4d44-8fa9-0fafd005e455`, write
-characteristic `ISRX` (handle `0x11`), notifications from `ISTX` (handle `0x0E`) —
-see [PROTOCOL.md](../../PROTOCOL.md).
-
-## Usage — WiFi hotspot (TCP)
-
-Pick **WiFi · TCP** in the transport switch, set host and port, press **Connect**
-(Enter in either field works too). Everything else — polling, SOC, kWh — is identical.
+To tolerate flaky hotspot links, **each poll does a fresh `connect → request → disconnect`**
+cycle. If a read fails, the watch loop keeps running and retries on the next poll.
 
 | Situation | Host | Port |
 |---|---|---|
 | PC joined to the battery's own AP | `192.168.155.1` | `53970` |
 | PC reaching it through the phone/adb relay | `127.0.0.1` | `53970` |
+
+The app does not auto-connect on startup; press **Connect** once the PC/network path
+is ready.
+
+## Usage — Bluetooth LE
+
+1. Windows Settings → **Bluetooth on**; power the battery within range.
+2. Switch to **Bluetooth** and press **Scan 10s** → Felicity batteries advertise as
+   `F` + DevSN (e.g. `F072604825024250800`), strongest RSSI first.
+3. Tap one → it connects and shows SOC %, remaining kWh, voltage, current and capacity.
+4. Readings repeat every 60 s over a persistent BLE link; **Read now** fetches at once,
+   **Disconnect / Back** returns to scanning.
+
+The BLE service is `6e6f736a-4643-4d44-8fa9-0fafd005e455`, write characteristic `ISRX`
+(handle `0x11`), notifications from `ISTX` (handle `0x0E`) — see
+[PROTOCOL.md](../../PROTOCOL.md).
 
 The battery's hotspot is a DHCP server at `192.168.155.1` and its monitor socket
 listens on `53970`. If Windows refuses that AP (it does: the battery's WPA2 group
@@ -97,18 +105,19 @@ then set host `127.0.0.1`, port `53970` in the app.
 
 ### Launch flags
 
-The transport can be fixed at launch, which also dials immediately — handy for the
-bridge workflow:
+WiFi/TCP is the default. The transport can be fixed at launch:
 
 ```sh
+bin/felicity-battery-watch.exe                       # WiFi/TCP (default)
 bin/felicity-battery-watch.exe -via tcp -host 127.0.0.1 -port 53970
 bin/felicity-battery-watch.exe -via tcp              # 192.168.155.1:53970
-bin/felicity-battery-watch.exe                       # Bluetooth
+bin/felicity-battery-watch.exe -via ble              # Bluetooth
 ```
 
-The battery serves **one TCP client at a time** and does not recover from a
-half-closed socket, so the app fully closes the link on Disconnect / transport
-switch, and does *not* auto-retry a failed dial — press **Connect** again.
+The battery serves **one TCP client at a time** and does not recover well from a
+half-closed socket. WiFi watch mode handles this by using a fresh connection per
+reading (`connect → request → disconnect`) and retrying on the normal 60 s schedule
+when a read fails. Press **Disconnect** / switch transport to stop watching.
 
 ## Formula
 
@@ -135,12 +144,12 @@ Pack (EMS) values are preferred when the device reports them; the per-battery
 | Method | Purpose |
 |---|---|
 | `Scan(seconds)` | BLE scan (refused in TCP mode) → `[]BatteryDevice` |
-| `Connect(deviceID)` | connect a scanned BLE device |
-| `ConnectTCP(host, port)` | dial the WiFi-hotspot socket |
-| `SetTransport(mode, host, port)` | `ble` \| `tcp`; closes any live link first |
-| `GetTransport()` | active mode, endpoint, connected flag |
-| `GetReading()` | one realtime snapshot |
-| `Disconnect()` | close the link, stop polling |
+| `Connect(deviceID)` | connect a scanned BLE device (persistent BLE link) |
+| `ConnectTCP(host, port)` | start WiFi watch (fresh connect/read/disconnect per poll) |
+| `SetTransport(mode, host, port)` | `ble` \| `tcp`; stops any live link/watch first |
+| `GetTransport()` | active mode, endpoint, connected/watching flag |
+| `GetReading()` | one realtime snapshot (TCP does a one-shot cycle) |
+| `Disconnect()` | stop BLE link or TCP watch |
 
 Push events: `battery:devices`, `battery:reading`, `battery:connection`,
 `battery:transport`.

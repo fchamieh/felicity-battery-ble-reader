@@ -14,15 +14,18 @@ import (
 var assets embed.FS
 
 func main() {
-	// Optional launch flags, handy for the WiFi/TCP path:
+	// Optional launch flags. WiFi/TCP is the default; each reading does a
+	// fresh connect → request → disconnect cycle to tolerate flaky hotspot
+	// links.
 	//
 	//	felicity-battery-watch -via tcp -host 127.0.0.1 -port 53970
+	//	felicity-battery-watch -via ble
 	//
 	// Parsed with a private FlagSet and errors discarded, so any flags the
 	// Wails toolchain itself adds can never break the app.
 	fs := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	via := fs.String("via", TransportBLE, "transport: ble | tcp")
+	via := fs.String("via", TransportTCP, "transport: tcp (default) | ble")
 	host := fs.String("host", "", "battery monitor address (tcp; default 192.168.155.1)")
 	port := fs.Int("port", 0, "battery monitor port (tcp; default 53970)")
 	_ = fs.Parse(os.Args[1:])
@@ -31,7 +34,7 @@ func main() {
 
 	app := application.New(application.Options{
 		Name:        "felicity-battery-watch",
-		Description: "Felicity battery monitor — scan over Bluetooth or dial the WiFi hotspot, then poll pack SOC and remaining kWh",
+		Description: "Felicity battery monitor — watch pack SOC and remaining kWh over WiFi/TCP (default) or Bluetooth",
 		Services: []application.Service{
 			application.NewService(service),
 		},

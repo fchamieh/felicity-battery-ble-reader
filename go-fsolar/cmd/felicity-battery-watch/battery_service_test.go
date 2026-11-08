@@ -59,8 +59,8 @@ func TestParseAddress(t *testing.T) {
 func TestNewBatteryServiceDefaults(t *testing.T) {
 	s := NewBatteryService("", "", 0)
 	info := s.GetTransport()
-	if info.Mode != TransportBLE {
-		t.Errorf("Mode = %q, want %q", info.Mode, TransportBLE)
+	if info.Mode != TransportTCP {
+		t.Errorf("Mode = %q, want %q", info.Mode, TransportTCP)
 	}
 	if info.Host != fsolar.DefaultTCPHost || info.Port != fsolar.DefaultTCPPort {
 		t.Errorf("endpoint = %s:%d, want %s:%d",
@@ -110,8 +110,8 @@ func TestSetTransportRejectsBadInput(t *testing.T) {
 		t.Error("expected error for an out-of-range port")
 	}
 	// A rejected change must leave the previous transport in place.
-	if info := s.GetTransport(); info.Mode != TransportBLE {
-		t.Errorf("Mode = %q after a rejected change, want %q", info.Mode, TransportBLE)
+	if info := s.GetTransport(); info.Mode != TransportTCP {
+		t.Errorf("Mode = %q after a rejected change, want %q", info.Mode, TransportTCP)
 	}
 }
 

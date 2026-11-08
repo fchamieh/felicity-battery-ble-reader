@@ -75,32 +75,43 @@ func init() {
 
 // BatteryService drives one link to the battery — Bluetooth LE or the WiFi
 // hotspot's plain TCP socket — and exposes it to the frontend.
+//
+// BLE keeps a persistent connection and polls on it. WiFi/TCP mode is
+// deliberately different: the battery's hotspot serves one client and does
+// not recover well from flaky/half-closed sockets (common on phone/AP
+// bridges), so each scheduled reading does a fresh connect → realtime
+// request → disconnect cycle.
 type BatteryService struct {
-	mu        sync.Mutex
-	mode      string // TransportBLE (default) or TransportTCP
-	ble       *fsolar.Client
-	tcp       *fsolar.TCPClient
-	bleReady  bool
-	host      string
-	port      int
-	deviceID  string
-	scanning  bool
-	pollStop  chan struct{}
-	pollDone  chan struct{}
-	userClose bool
+	mu          sync.Mutex
+	mode        string // TransportBLE (default) or TransportTCP
+	ble         *fsolar.Client
+	tcp         *fsolar.TCPClient
+	bleReady    bool
+	host        string
+	port        int
+	deviceID    string
+	scanning    bool
+	pollStop    chan struct{}
+	pollDone    chan struct{}
+	userClose   bool
+	tcpWatching bool       // TCP "watch" loop active (connect-read-disconnect per poll)
+	tcpMu       sync.Mutex // serializes TCP connect/read/disconnect cycles
 }
 
-// NewBatteryService returns a service preconfigured for a transport, so the
-// app can be launched straight into TCP mode:
+// NewBatteryService returns a service preconfigured for a transport.
+//
+// WiFi/TCP is the default because it avoids Bluetooth pairing/permission
+// friction and, with connect-read-disconnect polling, tolerates flaky
+// hotspot links. Launch with -via ble to start in Bluetooth mode.
 //
 //	felicity-battery-watch -via tcp -host 127.0.0.1 -port 53970
 //
-// Bad or empty arguments fall back to the defaults rather than failing.
+// Bad arguments fall back to TCP defaults rather than failing.
 func NewBatteryService(mode, host string, port int) *BatteryService {
 	s := &BatteryService{}
 	newMode, newHost, newPort, err := s.planTransport(mode, host, port)
 	if err != nil {
-		newMode, newHost, newPort = TransportBLE, fsolar.DefaultTCPHost, fsolar.DefaultTCPPort
+		newMode, newHost, newPort = TransportTCP, fsolar.DefaultTCPHost, fsolar.DefaultTCPPort
 	}
 	s.mode, s.host, s.port = newMode, newHost, newPort
 	return s
@@ -114,8 +125,8 @@ func (s *BatteryService) emit(event string, data any) {
 
 // defaultsLocked normalises unset values. s.mu must be held.
 func (s *BatteryService) defaultsLocked() {
-	if s.mode != TransportTCP {
-		s.mode = TransportBLE
+	if s.mode != TransportBLE {
+		s.mode = TransportTCP
 	}
 	if s.host == "" {
 		s.host = fsolar.DefaultTCPHost
@@ -147,7 +158,7 @@ func (s *BatteryService) planTCP(host string, port int) (string, int, error) {
 func (s *BatteryService) planTransport(mode, host string, port int) (string, string, int, error) {
 	mode = strings.ToLower(strings.TrimSpace(mode))
 	if mode == "" {
-		mode = TransportBLE
+		mode = TransportTCP
 	}
 	switch mode {
 	case TransportBLE:
@@ -206,15 +217,16 @@ func (s *BatteryService) GetTransport() TransportInfo {
 		DeviceID: s.deviceID,
 	}
 	link := s.linkLocked()
-	info.Connected = link != nil && link.Connected()
+	info.Connected = s.tcpWatching || (link != nil && link.Connected())
 	s.mu.Unlock()
 	return info
 }
 
 // SetTransport switches between Bluetooth and TCP. host/port are only
 // meaningful for TCP; pass "" / 0 to keep the remembered endpoint. Any live
-// link is closed first — the battery's TCP stack serves one client at a time,
-// and the BLE adapter is happier when the old GATT link is properly torn down.
+// link or TCP watch loop is stopped first — the battery's TCP stack serves
+// one client at a time, and the BLE adapter is happier when the old GATT
+// link is properly torn down.
 func (s *BatteryService) SetTransport(mode, host string, port int) error {
 	s.mu.Lock()
 	if s.scanning {
@@ -224,7 +236,7 @@ func (s *BatteryService) SetTransport(mode, host string, port int) error {
 	oldLink := s.linkLocked()
 	oldID := s.deviceID
 	rememberedHost, rememberedPort := s.host, s.port
-	live := oldID != "" || (oldLink != nil && oldLink.Connected())
+	live := s.tcpWatching || oldID != "" || (oldLink != nil && oldLink.Connected())
 	s.mu.Unlock()
 
 	// Empty arguments keep the remembered endpoint rather than resetting it.
@@ -246,6 +258,7 @@ func (s *BatteryService) SetTransport(mode, host string, port int) error {
 	if live {
 		s.userClose = true
 		s.deviceID = ""
+		s.tcpWatching = false
 	}
 	s.mu.Unlock()
 
@@ -286,7 +299,9 @@ func (s *BatteryService) ensureBLE() (*fsolar.Client, error) {
 }
 
 // ensureTCP lazily creates the TCP client and points it at host:port.
-// It does not dial — that is ConnectTCP's job.
+// It does not dial — that is ConnectTCP's job. No disconnect callback is
+// installed: TCP mode uses connect-read-disconnect cycles and manages its
+// own lifecycle, so transport-level disconnect events would be spurious.
 func (s *BatteryService) ensureTCP(host string, port int) (*fsolar.TCPClient, error) {
 	newHost, newPort, err := s.planTCP(host, port)
 	if err != nil {
@@ -297,7 +312,6 @@ func (s *BatteryService) ensureTCP(host string, port int) (*fsolar.TCPClient, er
 	defer s.mu.Unlock()
 	if s.tcp == nil {
 		s.tcp = fsolar.NewTCPClient()
-		s.tcp.SetOnDisconnect(s.onLinkClosed)
 	}
 	s.tcp.Host = newHost
 	s.tcp.Port = newPort
@@ -305,7 +319,8 @@ func (s *BatteryService) ensureTCP(host string, port int) (*fsolar.TCPClient, er
 	return s.tcp, nil
 }
 
-// onLinkClosed is the disconnect handler both transports report through.
+// onLinkClosed is the disconnect handler BLE reports through. TCP mode
+// manages connect-read-disconnect cycles itself and does not use this.
 func (s *BatteryService) onLinkClosed(err error) {
 	s.mu.Lock()
 	// userClose is set by Disconnect/SetTransport so a deliberate close is
@@ -313,7 +328,12 @@ func (s *BatteryService) onLinkClosed(err error) {
 	userClose := s.userClose
 	s.userClose = false
 	id := s.deviceID
+	mode := s.mode
 	s.mu.Unlock()
+
+	if mode == TransportTCP {
+		return
+	}
 
 	s.stopPolling()
 	if userClose {
@@ -457,14 +477,15 @@ func (s *BatteryService) Connect(deviceID string) error {
 	return nil
 }
 
-// ConnectTCP opens the battery's WiFi-hotspot socket (the app's "WiFi local"
-// mode) and starts the same 60 s polling loop. host/port default to the
-// remembered endpoint — 192.168.155.1:53970 when the PC has joined the
-// battery's AP, or 127.0.0.1 when reaching it through a phone/adb bridge
-// (see PROTOCOL.md §1.4 and go-fsolar/README.md).
+// ConnectTCP starts WiFi watch mode against the battery's monitor socket.
+// Because the hotspot link is often flaky and the battery dislikes
+// half-closed sockets, each reading uses a fresh connect → request →
+// disconnect cycle (no persistent TCP session). host/port default to the
+// remembered endpoint — 192.168.155.1:53970 on the battery AP, or
+// 127.0.0.1:53970 through a phone/adb relay (PROTOCOL.md §1.4).
 //
-// host may be given as "192.168.155.1" or "192.168.155.1:53970"; the port
-// argument wins when it is non-zero.
+// host may be "192.168.155.1" or "192.168.155.1:53970"; a non-zero port
+// argument wins.
 func (s *BatteryService) ConnectTCP(host string, port int) error {
 	// Accept the "host:port" form the device list and CLI both use.
 	if h, p, err := splitHostPort(host); err == nil {
@@ -476,26 +497,68 @@ func (s *BatteryService) ConnectTCP(host string, port int) error {
 		}
 	}
 
-	client, err := s.ensureTCP(host, port)
-	if err != nil {
+	if _, err := s.ensureTCP(host, port); err != nil {
 		return err
 	}
+
+	target := net.JoinHostPort(s.rememberedHost(), strconv.Itoa(s.rememberedPort()))
 	s.mu.Lock()
-	if s.deviceID == client.Target() && client.Connected() {
-		s.mu.Unlock()
+	already := s.tcpWatching && s.deviceID == target && s.mode == TransportTCP
+	s.mu.Unlock()
+	if already {
 		return nil
 	}
+
+	// Stop any previous loop before changing state.
+	s.stopPolling()
+
+	// The first response after (re)joining a flaky hotspot can be empty or
+	// fail; retry a few times so the UI gets a good first reading quickly.
+	var (
+		reading  BatteryReading
+		firstErr error
+	)
+	for attempt := 1; attempt <= 3; attempt++ {
+		reading, firstErr = s.fetchReadingTCPOnce()
+		if firstErr == nil {
+			break
+		}
+		if attempt < 3 {
+			time.Sleep(1500 * time.Millisecond)
+		}
+	}
+
+	s.mu.Lock()
+	s.mode = TransportTCP
+	s.deviceID = target
+	s.tcpWatching = true
+	s.userClose = false
+	host, port = s.host, s.port
 	s.mu.Unlock()
 
-	if err := client.Connect(); err != nil {
-		return err
+	s.startPolling(60)
+
+	s.emit("battery:connection", BatteryConnection{Connected: true, DeviceID: target})
+	s.emit("battery:transport", TransportInfo{
+		Mode: TransportTCP, Host: host, Port: port, Connected: true, DeviceID: target,
+	})
+
+	if firstErr == nil {
+		s.emit("battery:reading", reading)
+	} else {
+		// Flaky first attempt: stay in watch mode so the next cycle retries.
+		s.emit("battery:connection", BatteryConnection{
+			Connected: true,
+			DeviceID:  target,
+			Error:     fmt.Sprintf("initial read failed (will retry): %v", firstErr),
+		})
 	}
-	s.afterConnected(client.Target())
 	return nil
 }
 
-// afterConnected records the link, starts the poll loop and pulls the first
-// sample. A failed first sample is reported but not fatal: polling retries.
+// afterConnected records a persistent BLE link, starts the poll loop and
+// pulls the first sample. A failed first sample is reported but not fatal:
+// polling retries.
 func (s *BatteryService) afterConnected(deviceID string) {
 	s.mu.Lock()
 	s.deviceID = deviceID
@@ -521,12 +584,13 @@ func (s *BatteryService) afterConnected(deviceID string) {
 	}
 }
 
-// Disconnect ends the link and stops polling.
+// Disconnect ends the link/watch and stops polling.
 func (s *BatteryService) Disconnect() error {
 	s.mu.Lock()
-	hasDevice := s.deviceID != ""
+	hasDevice := s.deviceID != "" || s.tcpWatching
 	link := s.linkLocked()
 	s.userClose = true
+	s.tcpWatching = false
 	s.mu.Unlock()
 
 	s.stopPolling()
@@ -543,6 +607,7 @@ func (s *BatteryService) Disconnect() error {
 	}
 	s.mu.Lock()
 	s.deviceID = ""
+	s.tcpWatching = false
 	s.mu.Unlock()
 	if hasDevice || err == nil {
 		s.emit("battery:connection", BatteryConnection{Connected: false})
@@ -556,12 +621,47 @@ func (s *BatteryService) GetReading() (BatteryReading, error) {
 	return s.fetchReading()
 }
 
+// fetchReadingTCPOnce performs one connect → realtime request → disconnect
+// cycle. It is used for flaky WiFi/TCP links instead of a persistent socket.
+func (s *BatteryService) fetchReadingTCPOnce() (BatteryReading, error) {
+	s.tcpMu.Lock()
+	defer s.tcpMu.Unlock()
+
+	s.mu.Lock()
+	host, port := s.host, s.port
+	client := s.tcp
+	s.mu.Unlock()
+	if client == nil {
+		client = fsolar.NewTCPClient()
+		s.mu.Lock()
+		if s.tcp == nil {
+			s.tcp = client
+		} else {
+			client = s.tcp
+		}
+		s.mu.Unlock()
+	}
+	client.Host = host
+	client.Port = port
+
+	if err := client.Connect(); err != nil {
+		return BatteryReading{}, err
+	}
+	defer client.Close()
+
+	doc, err := client.Request(fsolar.CmdRealtime, 15*time.Second)
+	if err != nil {
+		return BatteryReading{}, err
+	}
+	return parseReadingPayload(doc, time.Now())
+}
+
 // GetConnectionStatus reports the current link state.
 func (s *BatteryService) GetConnectionStatus() BatteryConnection {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	link := s.linkLocked()
-	connected := link != nil && link.Connected()
+	connected := s.tcpWatching || (link != nil && link.Connected())
 	return BatteryConnection{Connected: connected, DeviceID: s.deviceID}
 }
 
@@ -581,8 +681,14 @@ func (s *BatteryService) StopPolling() {
 
 func (s *BatteryService) fetchReading() (BatteryReading, error) {
 	s.mu.Lock()
+	mode := s.mode
+	tcpWatching := s.tcpWatching
 	link := s.linkLocked()
 	s.mu.Unlock()
+
+	if mode == TransportTCP || tcpWatching {
+		return s.fetchReadingTCPOnce()
+	}
 	if link == nil || !link.Connected() {
 		return BatteryReading{}, fmt.Errorf("not connected")
 	}
@@ -615,7 +721,7 @@ func (s *BatteryService) startPolling(intervalSec int) {
 					s.mu.Lock()
 					id := s.deviceID
 					link := s.linkLocked()
-					connected := link != nil && link.Connected()
+					connected := s.tcpWatching || (link != nil && link.Connected())
 					s.mu.Unlock()
 					s.emit("battery:connection", BatteryConnection{
 						Connected: connected,
@@ -697,6 +803,9 @@ func parseReadingPayload(doc string, now time.Time) (BatteryReading, error) {
 	capacityAh, capOK := pick("emsCapacity", "battCapacity")
 	if !socOK || !voltOK || !capOK {
 		return BatteryReading{}, fmt.Errorf("realtime payload missing SOC, voltage or capacity")
+	}
+	if soc == 0 && voltage == 0 && capacityAh == 0 {
+		return BatteryReading{}, fmt.Errorf("realtime payload returned empty values (0%% / 0V / 0Ah); battery may still be initializing")
 	}
 	current, _ := pick("emsCurrent", "battCurr")
 	status := fsolar.ReadStatus(obj)

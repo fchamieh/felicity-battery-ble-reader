@@ -29,6 +29,7 @@ const socBar = document.getElementById('soc-bar');
 const kwhValue = document.getElementById('kwh-value');
 const updatedLabel = document.getElementById('updated-label');
 const voltageValue = document.getElementById('voltage-value');
+const currentSign = document.getElementById('current-sign');
 const currentValue = document.getElementById('current-value');
 const capacityValue = document.getElementById('capacity-value');
 const nextPollValue = document.getElementById('next-poll-value');
@@ -48,16 +49,16 @@ let autoRetryTimer = null;
 const AUTO_RETRY_MS = 3000;
 
 // 'ble' | 'tcp' — mirrored from the backend, which owns the real link.
-let transport = 'ble';
+let transport = 'tcp';
 
 const BLE_HINT = 'Bluetooth LE — the battery advertises as <strong>F&lt;DevSN&gt;</strong>.';
 
 function tcpHint(host, port) {
   const target = escapeHtml(`${host || '192.168.155.1'}:${port || 53970}`);
-  const local = host === '127.0.0.1' || host === 'localhost' || host.startsWith('::1');
+  const local = host === '127.0.0.1' || host === 'localhost' || (host || '').startsWith('::1');
   const how = local
     ? 'via the phone/adb relay — see go-fsolar/README.md.'
-    : 'this PC must be joined to the battery\u2019s WiFi hotspot.';
+    : 'this PC must be joined to the battery\u2019s WiFi hotspot. Each reading uses a fresh connect/read/disconnect to handle flaky links.';
   return `TCP <strong>${target}</strong> — ${how}`;
 }
 
@@ -211,6 +212,28 @@ function stopCountdown() {
   }
 }
 
+function renderCurrent(amps) {
+  const v = Number(amps);
+  currentValue.classList.remove('current-charge', 'current-discharge');
+  if (!Number.isFinite(v)) {
+    currentSign.textContent = '';
+    currentValue.textContent = '--';
+    return;
+  }
+  if (v > 0) {
+    currentSign.textContent = '+';
+    currentValue.textContent = fmt(v, 1);
+    currentValue.classList.add('current-charge');
+  } else if (v < 0) {
+    currentSign.textContent = '\u2212'; // minus stays white
+    currentValue.textContent = fmt(Math.abs(v), 1);
+    currentValue.classList.add('current-discharge');
+  } else {
+    currentSign.textContent = '';
+    currentValue.textContent = fmt(0, 1);
+  }
+}
+
 function renderReading(r) {
   if (!r) return;
   socValue.textContent = fmt(r.soc, 0);
@@ -218,7 +241,7 @@ function renderReading(r) {
   socBar.style.width = `${pct}%`;
   kwhValue.textContent = fmt(r.remainingKWh, 2);
   voltageValue.textContent = fmt(r.voltage, 2);
-  currentValue.textContent = fmt(r.current, 1);
+  renderCurrent(r.current);
   capacityValue.textContent = fmt(r.capacityAh, 1);
   if (r.timestamp) {
     lastReadingTs = new Date(r.timestamp).getTime();
@@ -266,7 +289,9 @@ function clearReadingFields() {
   socValue.textContent = '--';
   kwhValue.textContent = '--';
   voltageValue.textContent = '--';
+  currentSign.textContent = '';
   currentValue.textContent = '--';
+  currentValue.classList.remove('current-charge', 'current-discharge');
   capacityValue.textContent = '--';
   socBar.style.width = '0%';
   updatedLabel.textContent = 'Waiting for first reading…';
@@ -310,7 +335,8 @@ async function applyTcpSettings() {
   }
 }
 
-// WiFi hotspot / TCP link: one dial, then the same 60 s poll loop as Bluetooth.
+// WiFi hotspot / TCP watch: each reading does a fresh connect → request →
+// disconnect cycle to tolerate flaky links, on a 60 s schedule.
 async function doConnectTCP() {
   if (scanInFlight) return;
   scanInFlight = true;
@@ -318,24 +344,24 @@ async function doConnectTCP() {
   const host = tcpHostInput.value.trim();
   const port = Number(tcpPortInput.value) || 0;
   const label = `${host || '192.168.155.1'}:${port || 53970}`;
-  scanStatus.textContent = `Connecting to ${label}…`;
+  scanStatus.textContent = `Connecting to ${label} (fresh link per reading)…`;
   scanBtn.classList.add('is-loading');
   scanBtn.disabled = true;
-  // Cleared before the call: the backend emits the first reading inside
+  // Cleared before the call: the backend may emit the first reading inside
   // ConnectTCP, so resetting after the await would erase it.
   clearReadingFields();
   try {
     await BatteryService.ConnectTCP(host, port);
     connectedId = label;
     detailName.textContent = `WiFi · ${label}`;
-    detailSn.textContent = 'TCP link to the battery monitor socket';
+    detailSn.textContent = 'TCP watch: fresh connect/read/disconnect each poll';
     showView('detail');
-    showToast('Connected', `${label} · reading every ${POLL_INTERVAL_S}s`);
+    showToast('Watching', `${label} · reading every ${POLL_INTERVAL_S}s (flaky-link safe)`);
     startCountdown();
   } catch (err) {
     console.error(err);
     showError(`Connect failed: ${errorMessage(err)}`);
-    scanStatus.textContent = 'Could not dial the battery. Check host/port (and the adb relay), then press Connect again.';
+    scanStatus.textContent = 'Could not reach the battery. Check host/port (and the adb relay), then press Connect again.';
   } finally {
     scanInFlight = false;
     scanBtn.classList.remove('is-loading');
@@ -457,7 +483,6 @@ tcpPortInput.addEventListener('change', applyTcpSettings);
 tcpHostInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doConnectTCP(); });
 tcpPortInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doConnectTCP(); });
 document.getElementById('back-btn').addEventListener('click', () => disconnect(false));
-document.getElementById('disconnect-btn').addEventListener('click', () => disconnect(false));
 document.getElementById('refresh-btn').addEventListener('click', async () => {
   try {
     const r = await BatteryService.GetReading();
@@ -475,8 +500,10 @@ gaugeCard?.addEventListener('dblclick', (e) => {
   setSocFocus(!socFocus);
 });
 
-// Restore the transport the backend was launched with (-via / -host / -port),
-// then start: auto-scan for Bluetooth, a Connect prompt for TCP.
+// Restore the transport the backend was launched with (-via / -host / -port).
+// No automatic Bluetooth scan at start; WiFi/TCP is the default and waits for
+// the user to press Connect (flaky hotspot links are easier to diagnose when
+// the first dial is explicit).
 async function initTransport() {
   try {
     const info = await BatteryService.GetTransport();
@@ -484,16 +511,17 @@ async function initTransport() {
       if (info.host) tcpHostInput.value = info.host;
       if (info.port) tcpPortInput.value = info.port;
       setTransportUI(info.mode);
+    } else {
+      setTransportUI('tcp');
     }
   } catch (err) {
     console.error('GetTransport failed:', err);
+    setTransportUI('tcp');
   }
   if (transport === 'tcp') {
-    // Launched straight into WiFi mode (-via tcp): dial once, no click needed.
-    scanStatus.textContent = 'Dialling the battery over TCP…';
-    doConnectTCP();
+    scanStatus.textContent = 'Ready. Press Connect to start watching (fresh link per reading).';
   } else {
-    doScan();
+    scanStatus.textContent = 'Ready to scan for Bluetooth batteries.';
   }
 }
 

@@ -55,6 +55,7 @@
         <span id="detail-name" class="detail-name">Battery</span>
         <span id="detail-sn" class="detail-sn"></span>
       </div>
+      <button id="refresh-btn" class="btn btn-secondary" aria-label="Read now" title="Read now">&#x21bb;</button>
     </div>
 
     <div class="gauge-card">
@@ -78,7 +79,7 @@
       </div>
       <div class="stat">
         <div class="stat-label">Current</div>
-        <div class="stat-value"><span id="current-value" class="num">--</span> <span class="stat-unit">A</span></div>
+        <div class="stat-value"><span id="current-sign" class="num current-sign"></span><span id="current-value" class="num">--</span> <span class="stat-unit">A</span></div>
       </div>
       <div class="stat">
         <div class="stat-label">Capacity</div>
@@ -91,10 +92,6 @@
       </div>
     </div>
 
-    <div class="detail-actions">
-      <button id="refresh-btn" class="btn btn-secondary">Read now</button>
-      <button id="disconnect-btn" class="btn btn-ghost btn-danger">Disconnect</button>
-    </div>
   </section>
 
   <div id="error-banner" class="error-banner" hidden role="alert"></div>
